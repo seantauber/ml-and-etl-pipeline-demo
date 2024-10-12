@@ -17,55 +17,71 @@ auth = HTTPBasicAuth()
 logging.basicConfig(filename='error.log', level=logging.ERROR)
 logger = logging.getLogger()
 
-# Load encryption key from environment variable
-encryption_key = os.environ.get('ENCRYPTION_KEY')
-cipher_suite = Fernet(encryption_key.encode())
-
-# Database connection details
-db_config = {
-    'dbname': os.environ.get('POSTGRES_DB'),
-    'user': os.environ.get('POSTGRES_USER'),
-    'password': os.environ.get('POSTGRES_PASSWORD'),
-    'host': os.environ.get('POSTGRES_HOST')
+# Database configurations
+db_role_configs = {
+    'analyst': {
+        'dbname': os.environ.get('POSTGRES_DB'),
+        'user': os.environ.get('ANALYST_DB_USER'),
+        'password': os.environ.get('ANALYST_DB_PASSWORD'),
+        'host': os.environ.get('POSTGRES_HOST')
+    },
+    'manager': {
+        'dbname': os.environ.get('POSTGRES_DB'),
+        'user': os.environ.get('MANAGER_DB_USER'),
+        'password': os.environ.get('MANAGER_DB_PASSWORD'),
+        'host': os.environ.get('POSTGRES_HOST')
+    },
+    'admin': {
+        'dbname': os.environ.get('POSTGRES_DB'),
+        'user': os.environ.get('ADMIN_DB_USER'),
+        'password': os.environ.get('ADMIN_DB_PASSWORD'),
+        'host': os.environ.get('POSTGRES_HOST')
+    }
 }
 
 # Authentication
 @auth.verify_password
 def verify_password(username, password):
-    # In a real application, you should check against secure stored credentials
-    # This is a simple example and should be replaced with a secure implementation
     if username == os.environ.get('AUTH_USERNAME') and password == os.environ.get('AUTH_PASSWORD'):
         return username
 
-# Initialize the database table
-def initialize_db():
-    try:
-        conn = psycopg2.connect(**db_config)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                first_name TEXT,
-                last_name TEXT,
-                email TEXT UNIQUE,
-                gender TEXT,
-                ip_address TEXT
-            );
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("Database initialized successfully.")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {str(e)}")
-        print(f"Failed to initialize database: {str(e)}")
+# Encryption setup
+encryption_key = os.environ.get('ENCRYPTION_KEY')
+cipher_suite = Fernet(encryption_key.encode())
 
-# Call the function to initialize the database
-initialize_db()
+# # Initialize the database table
+# def initialize_db():
+#     try:
+#         conn = psycopg2.connect(**db_config)
+#         cursor = conn.cursor()
+#         cursor.execute("""
+#             CREATE TABLE IF NOT EXISTS users (
+#                 id TEXT PRIMARY KEY,
+#                 first_name TEXT,
+#                 last_name TEXT,
+#                 email TEXT UNIQUE,
+#                 gender TEXT,
+#                 ip_address TEXT
+#             );
+#         """)
+#         conn.commit()
+#         cursor.close()
+#         conn.close()
+#         print("Database initialized successfully.")
+#     except Exception as e:
+#         logger.error(f"Failed to initialize database: {str(e)}")
+#         print(f"Failed to initialize database: {str(e)}")
+
+# # Call the function to initialize the database
+# initialize_db()
 
 @app.route('/health', methods=['GET'])
 def health_check():
     try:
+
+        role = request.args.get('role', 'analyst')  # Default to analyst if no role specified
+        db_config = db_role_configs[role]
+
         # Check database connection
         conn = psycopg2.connect(**db_config)
         cursor = conn.cursor()
@@ -89,6 +105,20 @@ def test_upload():
 @app.route('/etl', methods=['POST'])
 @auth.login_required
 def etl():
+    # Get the role from the request
+    role = request.form.get('role', 'analyst')  # Default to analyst if no role specified
+
+    # Make sure role is Admin and the user is authorized
+    # Only Admin can upload data
+    db_config = db_role_configs[role]
+    # Check database credentials
+    try:
+        conn = psycopg2.connect(**db_config)
+        conn.close()
+    except Exception as e:
+        logger.error(f"Database authentication failed: {str(e)}")
+        return f"Database authentication failed: {str(e)}", 401
+
     # Check if the request has the file part
     if 'file' not in request.files:
         return "No file part in the request.", 400
@@ -108,7 +138,12 @@ def etl():
     try:
         # Load and clean data
         df = pd.read_excel(file_path) if file.filename.endswith('.xlsx') else pd.read_csv(file_path)
+    
+    except Exception as e:
+        logger.error(f"ETL process failed during file load: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
+    try:
         # Check for expected columns
         expected_columns = {'id', 'first_name', 'last_name', 'email', 'gender', 'ip_address'}
         actual_columns = set(df.columns)
@@ -118,7 +153,7 @@ def etl():
             extra_columns = actual_columns - expected_columns
             error_message = f"Data validation error. Missing columns: {missing_columns}. Extra columns: {extra_columns}."
             logger.error(error_message)
-            return error_message, 400
+            return jsonify({"error": str(e)}), 400
 
         df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         df['email'] = df['email'].str.lower()
@@ -150,6 +185,11 @@ def etl():
         # Drop invalid rows
         df.drop(index=invalid_rows, inplace=True)
 
+    except Exception as e:
+        logger.error(f"ETL process failed during data processing: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+    try:
         # Encrypt and save valid data to the database
         conn = psycopg2.connect(**db_config)
         cursor = conn.cursor()
@@ -167,42 +207,61 @@ def etl():
         return "ETL process completed successfully.", 200
 
     except Exception as e:
-        logger.error(f"ETL process failed: {str(e)}")
-        return f"ETL process failed: {str(e)}", 500
+        logger.error(f"ETL process failed while writing to database: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/display-rows', methods=['GET'])
 @auth.login_required
 def display_rows():
     try:
+        role = request.args.get('role', 'analyst')  # Default to analyst if no role specified
+        db_config = db_role_configs[role]
+        
         conn = psycopg2.connect(**db_config)
         cursor = conn.cursor()
         
-        # Fetch the first 10 rows from the users table
-        cursor.execute("SELECT * FROM users LIMIT 10")
+        if role == 'analyst':
+            cursor.execute("SELECT * FROM masked_users LIMIT 5")
+        elif role == 'manager':
+            cursor.execute("SELECT * FROM users LIMIT 5")
+        elif role == 'admin':
+            cursor.execute("SELECT * FROM users LIMIT 5")
+        
+        columns = [desc[0] for desc in cursor.description]
         rows = cursor.fetchall()
-        
-        # Get column names
-        column_names = [desc[0] for desc in cursor.description]
-        
         cursor.close()
         conn.close()
         
-        # Decrypt the data
-        decrypted_rows = []
-        for row in rows:
-            decrypted_row = [cipher_suite.decrypt(value.encode()).decode() if value else None for value in row]
-            decrypted_rows.append(dict(zip(column_names, decrypted_row)))
-        
-        return jsonify(decrypted_rows), 200
+        # Decrypt data if necessary (for admin and partially for manager)
+        if role in ['admin', 'manager']:
+            decrypted_rows = []
+            for row in rows:
+                decrypted_row = [cipher_suite.decrypt(value.encode()).decode() if isinstance(value, str) else value for value in row]
+                decrypted_rows.append(dict(zip(columns, decrypted_row)))
+            return jsonify(decrypted_rows), 200
+        else:
+            return jsonify([dict(zip(columns, row)) for row in rows]), 200
     except Exception as e:
-        logger.error(f"Failed to fetch rows: {str(e)}")
+        logger.error(f"Display Rows Failed: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/delete-all', methods=['DELETE'])
 @auth.login_required
 def delete_all():
     try:
+
+        # Get the role from the request
+        role = request.form.get('role', 'analyst')  # Default to analyst if no role specified
+
+        # Make sure role is Admin and the user is authorized
+        # Only Admin can upload data
+        db_config = db_role_configs[role]
+        # Check database credentials
         conn = psycopg2.connect(**db_config)
+    except Exception as e:
+        logger.error(f"Database authentication failed: {str(e)}")
+        return f"Database authentication failed: {str(e)}", 401
+    try:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM users")
         conn.commit()
