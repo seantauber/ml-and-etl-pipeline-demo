@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:13-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - etl_network
+
+  etl:
+    build:
+      context: ./etl
+    container_name: etl_service
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - FLASK_APP=etl_service.py
+    volumes:
+      - ./data:/data
+      - ./scripts:/scripts
+    depends_on:
+      - db
+    networks:
+      - etl_network
+    ports:
+      - "5001:5000"
+    command: ["flask", "run", "--host=0.0.0.0"]
+
+volumes:
+  db_data:
+
+networks:
+  etl_network:
+
