@@ -1,0 +1,29 @@
+services:
+  tfx-pipeline:
+    build: .
+    container_name: tfx_pipeline
+    volumes:
+      - model_store:/app/serving_model/mnist_pipeline
+    depends_on:
+      - tf-serving
+    networks:
+      - tfx_network
+
+  tf-serving:
+    image: tensorflow/serving
+    container_name: tf_serving
+    ports:
+      - "8501:8501"
+    volumes:
+      - model_store:/models/mnist_model
+    environment:
+      - MODEL_NAME=mnist_model
+    networks:
+      - tfx_network
+
+volumes:
+  model_store:
+
+networks:
+  tfx_network:
+    driver: bridge
