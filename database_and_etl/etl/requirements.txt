@@ -1,7 +1,0 @@
-pandas[performance]>=2.2
-openpyxl>=3.1.0
-psycopg2-binary
-cryptography
-flask
-requests
-flask-httpauth

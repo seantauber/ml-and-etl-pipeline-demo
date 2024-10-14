@@ -15,7 +15,7 @@ Follow these steps to quickly set up and run the project:
 ### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/seantauber/ml-and-etl-pipeline-demo.git
-cd etl-service
+cd <project-directory>/etl
 ```
 
 ### Step 2: Set Up Environment Variables
