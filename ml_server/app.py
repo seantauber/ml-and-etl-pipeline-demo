@@ -1,4 +1,26 @@
 from flask import Flask, request, jsonify
+"""
+This module implements a Flask web server for training and predicting using a Convolutional Neural Network (CNN) on the Fashion MNIST dataset.
+
+Functions:
+    train_model(): Trains a CNN on the Fashion MNIST dataset and saves the trained model to a file.
+    train(): Flask route to trigger the training of the model via a POST request.
+    predict(): Flask route to predict the class of a provided image via a POST request.
+
+Routes:
+    /train (POST): Trains the model and saves it to a file.
+    /predict (POST): Predicts the class of an uploaded image using the trained model.
+
+Global Variables:
+    app: The Flask application instance.
+    model: The trained Keras model, initially set to None.
+    class_names: List of class names corresponding to the Fashion MNIST dataset.
+
+Usage:
+    Run this script to start the Flask server. The server will automatically train the model if it is not already trained.
+    Use the /train endpoint to retrain the model.
+    Use the /predict endpoint to classify an uploaded image.
+"""
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
